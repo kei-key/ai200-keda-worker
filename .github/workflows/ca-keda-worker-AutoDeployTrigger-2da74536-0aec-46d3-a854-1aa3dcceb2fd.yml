@@ -1,24 +1,16 @@
 name: Trigger auto deployment for ca-keda-worker
 
-# When this action will be executed
 on:
-  # Automatically trigger it when detected changes in repo
   push:
-    branches: 
-      [ main ]
-    paths:
-    - '**'
-    - '.github/workflows/ca-keda-worker-AutoDeployTrigger-2da74536-0aec-46d3-a854-1aa3dcceb2fd.yml'
-
-  # Allow manual trigger 
-  workflow_dispatch:      
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    permissions: 
-      id-token: write #This is required for requesting the OIDC JWT Token
-      contents: read #Required when GH token is used to authenticate with private repo
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout to the branch
@@ -31,19 +23,23 @@ jobs:
           tenant-id: ${{ secrets.CAKEDAWORKER_AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.CAKEDAWORKER_AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build and push container image to registry
-        uses: azure/container-apps-deploy-action@v2
+      - name: Docker Login to ACR
+        uses: azure/docker-login@v1
         with:
-          appSourcePath: ${{ github.workspace }}
-          _dockerfilePathKey_: _dockerfilePath_
-          _targetLabelKey_: _targetLabel_
-          registryUrl: 
-          registryUsername: ${{ secrets.CAKEDAWORKER_REGISTRY_USERNAME }}
-          registryPassword: ${{ secrets.CAKEDAWORKER_REGISTRY_PASSWORD }}
-          containerAppName: ca-keda-worker
-          resourceGroup: rg-ai200-keda
-          imageToBuild: default/[parameters('containerAppName')]:${{ github.sha }}
-          _buildArgumentsKey_: |
-            _buildArgumentsValues_
+          login-server: acraikeda001.azurecr.io
+          username: ${{ secrets.CAKEDAWORKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.CAKEDAWORKER_REGISTRY_PASSWORD }}
 
+      - name: Build and push image
+        run: |
+          docker build -t acraikeda001.azurecr.io/keda-worker:${{ github.sha }} .
+          docker push acraikeda001.azurecr.io/keda-worker:${{ github.sha }}
 
+      - name: Deploy to Container App
+        uses: azure/CLI@v2
+        with:
+          inlineScript: |
+            az containerapp update \
+              --name ca-keda-worker \
+              --resource-group rg-ai200-keda \
+              --image acraikeda001.azurecr.io/keda-worker:${{ github.sha }}
